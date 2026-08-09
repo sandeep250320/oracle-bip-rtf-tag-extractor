@@ -1,5 +1,7 @@
 # Oracle BIP RTF Template Tag Extractor
 
+**Live demo: [oracle-bip-rtf-template-tag-extractor.netlify.app](https://oracle-bip-rtf-template-tag-extractor.netlify.app/)**
+
 A single-file, client-side tool for inspecting and validating **Oracle BI Publisher (BIP)** RTF templates. Drop in an `.rtf` template and it renders the document's layout (tables, paragraphs, fonts, alignment) with every BIP field shown in place as a clickable chip — plus a full validation pass for common templating mistakes.
 
 Everything runs **100% locally in the browser**. No files are uploaded anywhere; the RTF never leaves your machine.
@@ -23,7 +25,7 @@ Everything runs **100% locally in the browser**. No files are uploaded anywhere;
 
 ## Usage
 
-1. Open [`index.html`](index.html) in any modern browser (or visit the GitHub Pages link if enabled for this repo).
+1. Open the [live demo](https://oracle-bip-rtf-template-tag-extractor.netlify.app/), or open [`index.html`](index.html) directly in any modern browser.
 2. Click the drop zone or drag an `.rtf` BIP template onto it.
 3. Browse the rendered document, review the validation panel, and click any field chip to inspect its underlying tag code.
 
