@@ -1,0 +1,924 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>BIP Template Tag Extractor v3 — RTF-like + Validated</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<style>
+  * { box-sizing: border-box; }
+  body { font-family: -apple-system, Segoe UI, Roboto, sans-serif; margin: 0; padding: 24px; background: #f5f6f8; color: #222; }
+  h1 { margin: 0 0 4px; font-size: 20px; }
+  .ver { display:inline-block; background:#059669; color:#fff; padding:2px 8px; border-radius:10px; font-size:11px; margin-left:8px; vertical-align:middle }
+  .sub { color: #666; font-size: 13px; margin-bottom: 20px; }
+  .drop {
+    border: 2px dashed #b3b8c2; border-radius: 8px; padding: 32px; text-align: center;
+    background: #fff; cursor: pointer; transition: all .15s;
+  }
+  .drop.hover { border-color: #10b981; background: #ecfdf5; }
+  .drop input { display: none; }
+  .controls { margin: 16px 0; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .controls input[type=text] { flex: 1; min-width: 200px; padding: 8px 10px; border: 1px solid #cbd0d8; border-radius: 6px; font-size: 13px; }
+  .controls button { padding: 8px 14px; background: #fff; border: 1px solid #cbd0d8; border-radius: 6px; cursor: pointer; font-size: 13px; }
+  .controls button:hover { background: #f0f2f5; }
+  .controls button.active { background: #059669; color: white; border-color: #059669; }
+  .stats { color: #555; font-size: 13px; }
+  .file-info { background: #fff; padding: 10px 14px; border-radius: 6px; margin: 12px 0; font-size: 13px; border: 1px solid #e5e7eb; }
+  .err { background: #fee2e2; color: #991b1b; padding: 10px; border-radius: 6px; margin: 12px 0; font-size: 13px; }
+  .empty { color: #888; padding: 20px; text-align: center; font-size: 13px; }
+
+  /* Validation */
+  .validation { background: #fff; border: 1px solid #e5e7eb; border-radius: 6px; margin: 12px 0; }
+  .validation-header { padding: 10px 14px; font-size: 13px; font-weight: 600; cursor: pointer; user-select: none; display: flex; justify-content: space-between; }
+  .validation-body { padding: 0 14px 12px; max-height: 260px; overflow-y: auto; }
+  .issue { padding: 6px 10px; margin: 4px 0; border-radius: 4px; font-size: 12px; border-left: 3px solid; }
+  .issue.error { background: #fef2f2; border-color: #dc2626; color: #7f1d1d; }
+  .issue.warn  { background: #fffbeb; border-color: #f59e0b; color: #78350f; }
+  .issue.info  { background: #eff6ff; border-color: #3b82f6; color: #1e3a8a; }
+  .no-issues { padding: 12px; color: #059669; font-size: 13px; }
+
+  /* ========== RTF-like document rendering ========== */
+  .doc {
+    background: white;
+    padding: 40px 50px;
+    border: 1px solid #d1d5db;
+    border-radius: 4px;
+    max-width: 900px;
+    margin: 12px auto;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.04);
+    font-family: 'Times New Roman', Times, serif;
+    font-size: 11pt;
+    line-height: 1.4;
+    color: #111;
+  }
+  .doc p { margin: 0 0 6pt 0; }
+  .doc p.title { font-size: 16pt; font-weight: bold; text-align: center; margin-bottom: 4pt; }
+  .doc p.subtitle { font-size: 12pt; text-align: center; margin-bottom: 12pt; }
+  .doc p.section { font-size: 12pt; font-weight: bold; margin: 12pt 0 4pt 0; }
+  .doc p.center { text-align: center; }
+  .doc p.right { text-align: right; }
+  .doc table { border-collapse: collapse; width: 100%; margin: 6pt 0; font-size: 10pt; }
+  .doc td { border: 1px solid #999; padding: 4px 6px; vertical-align: top; }
+  .doc td.header { background: #e5e7eb; font-weight: bold; }
+  .doc .bold { font-weight: bold; }
+  .doc .italic { font-style: italic; }
+
+  /* Field chips embedded in the document, mimicking Word's field shading */
+  .fchip {
+    display: inline-block; padding: 1px 6px; border-radius: 3px;
+    background: #dbeafe; color: #1e3a8a; font-family: ui-monospace, Consolas, monospace;
+    font-size: 9pt; cursor: pointer; border: 1px solid transparent;
+    white-space: nowrap; max-width: 250px; overflow: hidden; text-overflow: ellipsis; vertical-align: baseline;
+    transition: all .1s;
+  }
+  .fchip:hover { background: #bfdbfe; border-color: #3b82f6; }
+  .fchip.err { background: #fecaca; color: #7f1d1d; }
+  .fchip.err:hover { background: #fca5a5; border-color: #dc2626; }
+  .fchip.warn { background: #fed7aa; color: #78350f; }
+  .fchip.warn:hover { background: #fdba74; border-color: #f59e0b; }
+  .fchip.loop { background: #fef3c7; color: #78350f; }
+  .fchip.loop:hover { background: #fde68a; }
+  .fchip.cond { background: #ede9fe; color: #5b21b6; }
+  .fchip.cond:hover { background: #ddd6fe; }
+  .fchip.close { background: #f3f4f6; color: #6b7280; }
+  .fchip.expanded {
+    display: block; white-space: normal; max-width: none; overflow: visible;
+    background: #fff; border: 2px solid #3b82f6; padding: 10px; margin: 4px 0;
+  }
+  .fchip.faded { opacity: 0.25; }
+  .fchip.faded:hover { opacity: 0.6; }
+
+  /* Copy buttons */
+  .copy-btn {
+    padding: 3px 8px; font-size: 11px; border: 1px solid #c7d2fe; border-radius: 4px;
+    background: #eef2ff; cursor: pointer; font-family: -apple-system, sans-serif;
+    white-space: nowrap; flex-shrink: 0; transition: all .1s;
+  }
+  .copy-btn:hover { background: #c7d2fe; }
+  .copy-btn.copied { background: #d1fae5; border-color: #6ee7b7; }
+  .copy-btn-sm {
+    display: inline-block; margin-left: 4px; padding: 0 3px; font-size: 10px;
+    border: none; background: transparent; cursor: pointer; opacity: 0.4;
+    vertical-align: middle; transition: opacity .1s;
+  }
+  .fchip:hover .copy-btn-sm { opacity: 0.8; }
+  .copy-btn-sm:hover { opacity: 1 !important; }
+
+  .code-view {
+    margin-top: 8px; padding: 8px; background: #f9fafb; border-radius: 4px;
+    font-family: ui-monospace, Consolas, Menlo, monospace;
+    font-size: 11px; line-height: 1.55; white-space: pre-wrap; word-break: break-word;
+  }
+  .k-loop { color: #b45309; font-weight: 600; }
+  .k-cond { color: #6d28d9; font-weight: 600; }
+  .k-var  { color: #0369a1; }
+  .k-tmpl { color: #047857; font-weight: 600; }
+  .k-close { color: #9aa0a8; }
+
+  /* Custom tooltip */
+  .tooltip {
+    position: fixed; z-index: 1000; max-width: 500px; padding: 10px 12px;
+    background: #1f2937; color: #f9fafb; border-radius: 6px;
+    font-family: ui-monospace, Consolas, Menlo, monospace; font-size: 12px; line-height: 1.5;
+    box-shadow: 0 10px 25px rgba(0,0,0,0.2); pointer-events: none;
+    white-space: pre-wrap; word-break: break-word; display: none;
+  }
+  .tooltip.visible { display: block; }
+  .tooltip .t-title { color: #fbbf24; font-weight: 600; margin-bottom: 4px; }
+  .tooltip .t-err { color: #fca5a5; margin-top: 6px; padding-top: 6px; border-top: 1px solid #374151; }
+
+  details { margin-top: 12px; }
+  summary { cursor: pointer; font-size: 13px; color: #555; }
+</style>
+</head>
+<body>
+
+<h1>BIP Template Tag Extractor <span class="ver">v3 · RTF-like + validated</span></h1>
+<div class="sub">Renders the RTF's page structure with fields as Word-like chips in position. Hover for code, click to expand, full validation with error/warning highlights.</div>
+
+<label class="drop" id="drop">
+  <input type="file" id="file" accept=".rtf">
+  <div><strong>Click or drop an RTF template here</strong></div>
+  <div style="color:#888;font-size:12px;margin-top:6px">.rtf only for v2 (visual layout) · runs 100% locally</div>
+</label>
+
+<div id="fileInfo"></div>
+<div id="validationPanel"></div>
+
+<div class="controls" id="controls" style="display:none">
+  <input type="text" id="search" placeholder="Highlight fields by name or code">
+  <button id="showAll">Show all code</button>
+  <button id="collapseAll">Collapse all</button>
+  <button id="onlyIssues">Only issues</button>
+  <span class="stats" id="stats"></span>
+</div>
+
+<div id="output"></div>
+<div class="tooltip" id="tooltip"></div>
+
+<script>
+// ==================== Shared: RTF header extraction ====================
+function decodeBase64(b64) {
+  try {
+    const bin = atob(b64.replace(/\s+/g,''));
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    return new TextDecoder('utf-8').decode(bytes);
+  } catch (e) { return null; }
+}
+function extractDisplayNames(rtf) {
+  const names = {};
+  const re = /\\\*\\ffdeftext\s+([^{}]*?)\}\{\\\*\\ffstattext\s+<\?ref:(xdo\d+)\?>/g;
+  let m; while ((m = re.exec(rtf)) !== null) names[m[2]] = m[1].trim();
+  return names;
+}
+function extractDocvarDefs(rtf) {
+  const defs = {};
+  const re = /\\\*\\docvar\s*\{(xdo\d+)\}\{([A-Za-z0-9+/=\s]*?)\}/g;
+  let m; while ((m = re.exec(rtf)) !== null) {
+    const dec = decodeBase64(m[2]);
+    if (dec != null) defs[m[1]] = dec;
+  }
+  return defs;
+}
+function extractTagsFromString(s) {
+  const out = [];
+  const re = /<\?([\s\S]*?)\?>/g;
+  let m; while ((m = re.exec(s)) !== null) {
+    out.push({ raw: m[0], inner: m[1].replace(/[\r\n\t]+/g, ' ').replace(/\s{2,}/g, ' ').trim() });
+  }
+  return out;
+}
+function expandDef(text, defs, seen) {
+  const tags = extractTagsFromString(text);
+  const out = [];
+  for (const t of tags) {
+    const m = t.inner.match(/^ref:(xdo\d+)$/);
+    if (m) {
+      const name = m[1];
+      if (seen.has(name) || !defs[name]) { out.push({ ...t, missing: !defs[name], cycle: seen.has(name) }); continue; }
+      const s2 = new Set(seen); s2.add(name);
+      out.push(...expandDef(defs[name], defs, s2));
+    } else out.push(t);
+  }
+  return out;
+}
+function classify(inner) {
+  const lc = inner.toLowerCase();
+  if (/^end\s+for-each/.test(lc)) return { kind: 'close', label: 'end for-each', delta: -1 };
+  if (/^end\s+if/.test(lc))       return { kind: 'close', label: 'end if', delta: -1 };
+  if (/^end\s+choose/.test(lc))   return { kind: 'close', label: 'end choose', delta: -1 };
+  if (/^end\s+when/.test(lc) || /^end\s+otherwise/.test(lc)) return { kind: 'close', label: 'end when/otherwise', delta: 0 };
+  if (/^for-each(-group)?[:@]/.test(lc)) return { kind: 'loop', label: 'for-each', delta: +1 };
+  if (/^if:/.test(lc))            return { kind: 'cond', label: 'if', delta: +1 };
+  if (/^choose/.test(lc))         return { kind: 'cond', label: 'choose', delta: +1 };
+  if (/^when:/.test(lc))          return { kind: 'cond', label: 'when', delta: 0, mid: true };
+  if (/^otherwise/.test(lc))      return { kind: 'cond', label: 'otherwise', delta: 0, mid: true };
+  if (/^xdofx:/.test(lc))         return { kind: 'var', label: 'xdofx', delta: 0 };
+  if (/^xdoxslt:/.test(lc))       return { kind: 'var', label: 'xdoxslt', delta: 0 };
+  if (/^format-number/.test(lc))  return { kind: 'var', label: 'format-number', delta: 0 };
+  return { kind: 'var', label: 'expr', delta: 0 };
+}
+
+// ==================== RTF → structured document (tables, paragraphs) ====================
+// Simplified RTF tokenizer that produces a stream of events:
+//   - text: literal characters
+//   - field: <?ref:xdoNNNN?> encountered
+//   - cell:  \cell end
+//   - row:   \row end
+//   - par:   \par (paragraph break)
+//   - fs N:  font size change
+//   - b on/off, i on/off: formatting
+//   - We skip header tables (fonttbl, colortbl, stylesheet, docvar, etc.)
+
+function parseRtfToBlocks(rtf) {
+  const defs = extractDocvarDefs(rtf);
+  const displayNames = extractDisplayNames(rtf);
+
+  // PRE-PASS: Replace entire {\field ...} groups with their ref marker.
+  // A field group contains:
+  //   {\*\fldinst ... FORMTEXT ... {\*\datafield HEX...} {\*\formfield ... {\*\ffstattext <?ref:xdoNNNN?>}}}
+  //   {\fldrslt ... display-label ...}
+  // We want ONLY the <?ref:xdoNNNN?> text — everything else (FORMTEXT, hex, label) is noise.
+  // Also strip {\*\bkmkstart TextNNN} and {\*\bkmkend TextNNN} — bookmark names leak as visible text.
+
+  // Brace-counted group skipper: starting at pos of '{', returns the char AFTER matching '}'.
+  function skipGroup(s, start) {
+    let depth = 1, k = start + 1;
+    while (k < s.length && depth > 0) {
+      const c = s[k];
+      if (c === '\\' && (s[k+1] === '{' || s[k+1] === '}' || s[k+1] === '\\')) { k += 2; continue; }
+      if (c === '{') depth++;
+      else if (c === '}') depth--;
+      k++;
+    }
+    return k;
+  }
+
+  // Walk through and replace \field groups and \bkmkstart/\bkmkend
+  let cleaned = [];
+  let ci = 0;
+  const cN = rtf.length;
+  while (ci < cN) {
+    if (rtf[ci] === '{') {
+      // Check for {\field or {\field\flddirty
+      const peek = rtf.substr(ci, 30);
+      if (/^\{\\field\b/.test(peek)) {
+        // Extract the entire group content to find the ref inside
+        const groupEnd = skipGroup(rtf, ci);
+        const groupText = rtf.substring(ci, groupEnd);
+        // Look for <?ref:xdoNNNN?> anywhere in the group
+        const refMatch = groupText.match(/<\?ref:(xdo\d+)\?>/);
+        if (refMatch) {
+          cleaned.push(refMatch[0]); // Just the ref marker
+        }
+        // Non-BIP fields (PAGE, NUMPAGES, etc.) — skip entirely, not relevant for tag extraction
+        ci = groupEnd;
+        continue;
+      }
+      // {\*\bkmkstart TextNNN} or {\*\bkmkend TextNNN} — skip entirely
+      if (/^\{\\\*\\bkmk(start|end)\b/.test(peek)) {
+        ci = skipGroup(rtf, ci);
+        continue;
+      }
+      // {\*\bkmkstart without \* — sometimes written as {\bkmkstart ...}
+      if (/^\{\\bkmk(start|end)\b/.test(peek)) {
+        ci = skipGroup(rtf, ci);
+        continue;
+      }
+    }
+    cleaned.push(rtf[ci]);
+    ci++;
+  }
+  rtf = cleaned.join('');
+
+  // Brace-aware skip of noise groups (fonttbl, colortbl, etc.)
+  const KILL = new Set([
+    'fonttbl','colortbl','stylesheet','listtable','listoverridetable','revtbl',
+    'rsidtbl','themedata','datastore','latentstyles','info','generator','pict',
+    'bin','xmlnstbl','filetbl','company','author','operator','creatim','revtim',
+    'printim','buptim','wgrffmtfilter','protusertbl','themeoverride','docvar',
+    'nonesttables','wpsCustomData','shpinst','shppict',
+    'nonshppict','panose','falt','colorschememapping','datafield',
+    'blipuid','themeoverride1','pgdsctbl','mmathPr','xmlopen'
+  ]);
+  const buf = [];
+  let i = 0;
+  const N = rtf.length;
+  while (i < N) {
+    if (rtf[i] === '{') {
+      // Peek: optional \* then \name
+      let j = i + 1;
+      if (rtf[j] === '\\' && rtf[j+1] === '*') j += 2;
+      if (rtf[j] === '\\') {
+        const m = rtf.substr(j, 40).match(/^\\([a-zA-Z]+)/);
+        if (m && KILL.has(m[1])) {
+          // Skip whole group, brace-counted
+          let depth = 1, k = i + 1;
+          while (k < N && depth > 0) {
+            const c = rtf[k];
+            if (c === '\\' && (rtf[k+1] === '{' || rtf[k+1] === '}' || rtf[k+1] === '\\')) { k += 2; continue; }
+            if (c === '{') depth++;
+            else if (c === '}') depth--;
+            k++;
+          }
+          i = k;
+          buf.push(' ');
+          continue;
+        }
+      }
+    }
+    buf.push(rtf[i]);
+    i++;
+  }
+  let s = buf.join('');
+
+  // Tokenize
+  const sN = s.length;
+  let si = 0;
+  // Skip until first content — the RTF prolog
+  // But we can just walk from the start.
+  const events = [];
+  let currentText = '';
+  let fontSize = 22;   // 11pt default
+  let bold = false;
+  let italic = false;
+  let alignment = 'left';
+  let depth = 0;
+  let ignoreDepth = -1; // set to depth when we enter a group to skip
+
+  const flushText = () => {
+    if (currentText) {
+      events.push({ type: 'text', text: currentText, fs: fontSize, bold, italic, alignment });
+      currentText = '';
+    }
+  };
+
+  while (si < sN) {
+    const c = s[si];
+    if (c === '{') {
+      depth++;
+      // Check for \*\bookmark or other ignorable
+      if (s.substr(si, 3) === '{\\*') {
+        // If nothing we care about, skip the group. But some \* groups are important (fldrslt).
+        // We'll enter and let the internal parser continue; unimportant content just becomes text.
+      }
+      si++;
+      continue;
+    }
+    if (c === '}') {
+      depth--;
+      if (ignoreDepth >= 0 && depth < ignoreDepth) ignoreDepth = -1;
+      si++;
+      continue;
+    }
+    if (ignoreDepth >= 0) { si++; continue; }
+
+    if (c === '\\') {
+      // Control words / symbols
+      // \'xx
+      if (s[si+1] === "'") {
+        const hex = s.substr(si+2, 2);
+        if (/^[0-9a-fA-F]{2}$/.test(hex)) {
+          currentText += String.fromCharCode(parseInt(hex, 16));
+          si += 4;
+          continue;
+        }
+      }
+      // \\ \{ \}
+      if (s[si+1] === '\\' || s[si+1] === '{' || s[si+1] === '}') {
+        currentText += s[si+1];
+        si += 2;
+        continue;
+      }
+      // Control word: \name  optional -?digits  optional space
+      const cwm = s.substr(si, 60).match(/^\\([a-zA-Z]+)(-?\d+)?[ ]?/);
+      if (cwm) {
+        const name = cwm[1];
+        const num = cwm[2] ? parseInt(cwm[2], 10) : null;
+        const len = cwm[0].length;
+
+        // Formatting
+        if (name === 'par') { flushText(); events.push({ type: 'par', alignment }); }
+        else if (name === 'line') { currentText += '\n'; }
+        else if (name === 'tab') { currentText += '\t'; }
+        else if (name === 'cell') { flushText(); events.push({ type: 'cell' }); }
+        else if (name === 'row')  { flushText(); events.push({ type: 'row' }); }
+        else if (name === 'trowd') { events.push({ type: 'trowd' }); }
+        else if (name === 'fs')   { flushText(); fontSize = num || fontSize; }
+        else if (name === 'b')    { flushText(); bold = num !== 0; }
+        else if (name === 'i')    { flushText(); italic = num !== 0; }
+        else if (name === 'ql')   { flushText(); alignment = 'left'; }
+        else if (name === 'qc')   { flushText(); alignment = 'center'; }
+        else if (name === 'qr')   { flushText(); alignment = 'right'; }
+        else if (name === 'qj')   { flushText(); alignment = 'justify'; }
+        else if (name === 'lquote' || name === 'rquote') currentText += "'";
+        else if (name === 'ldblquote' || name === 'rdblquote') currentText += '"';
+        else if (name === 'emdash') currentText += '—';
+        else if (name === 'endash') currentText += '–';
+        else if (name === 'bullet') currentText += '•';
+        // Groups we skip (metadata only — NOT ffstattext which contains the visible ref)
+        else if (name === 'fldinst' || name === 'bkmkstart' || name === 'bkmkend' ||
+                 name === 'ffdeftext' || name === 'ffname' || name === 'ffhelptext') {
+          // Skip the current group's remaining content
+          ignoreDepth = depth;
+        }
+        si += len;
+        continue;
+      }
+      // Unknown \ sequence
+      si++;
+      continue;
+    }
+    // Ignore control CRLF but keep visible
+    if (c === '\r' || c === '\n') { si++; continue; }
+    // Literal
+    currentText += c;
+    si++;
+  }
+  flushText();
+
+  // Now find <?ref:xdoNNNN?> in text events and split them into text + field events
+  const finalEvents = [];
+  const refRe = /<\?ref:(xdo\d+)\?>/g;
+  for (const ev of events) {
+    if (ev.type !== 'text') { finalEvents.push(ev); continue; }
+    let last = 0, m;
+    refRe.lastIndex = 0;
+    while ((m = refRe.exec(ev.text)) !== null) {
+      const pre = ev.text.substring(last, m.index);
+      if (pre) finalEvents.push({ ...ev, text: pre });
+      finalEvents.push({ type: 'field', xdoId: m[1], displayName: displayNames[m[1]] || m[1], fs: ev.fs, bold: ev.bold, italic: ev.italic });
+      last = m.index + m[0].length;
+    }
+    const rest = ev.text.substring(last);
+    if (rest) finalEvents.push({ ...ev, text: rest });
+  }
+
+  return { events: finalEvents, defs, displayNames };
+}
+
+// ==================== Build fields (with resolved code) ====================
+function buildFields(events, defs) {
+  const fields = [];
+  let idx = 0;
+  events.forEach(ev => {
+    if (ev.type === 'field') {
+      const tags = defs[ev.xdoId] ? expandDef(defs[ev.xdoId], defs, new Set([ev.xdoId])) : [];
+      const field = {
+        idx: idx++,
+        xdoId: ev.xdoId, displayName: ev.displayName,
+        tags, rawCode: defs[ev.xdoId] || '', missing: !defs[ev.xdoId]
+      };
+      fields.push(field);
+      ev._fieldIdx = field.idx;
+    }
+  });
+  return fields;
+}
+
+// ==================== Validation (reused from v3) ====================
+function validate(fields) {
+  const issues = [];
+  const allTags = [];
+  fields.forEach((f, fi) => f.tags.forEach(t => allTags.push({ ...t, fieldIdx: fi, field: f })));
+
+  // ---- 1. STRUCTURAL: nesting balance + mismatched close ----
+  const stack = [];
+  allTags.forEach(t => {
+    const c = classify(t.inner);
+    if (c.delta > 0) stack.push({ tag: t, cls: c });
+    else if (c.delta < 0) {
+      const top = stack.pop();
+      if (!top) {
+        issues.push({ level: 'error', title: 'Orphan closing tag',
+          detail: `${t.raw} in "${t.field.displayName}" (${t.field.xdoId||'?'}) — no matching opener`,
+          fieldIdx: t.fieldIdx });
+      } else {
+        const openLabel = top.cls.label;
+        const closeLabel = c.label.replace(/^end\s+/, '');
+        // Allow for-each-group closed by "end for-each"
+        const okForEach = openLabel === 'for-each' && /for-each/.test(closeLabel);
+        if (openLabel !== closeLabel && !okForEach) {
+          issues.push({ level: 'error', title: 'Mismatched close',
+            detail: `Opened "${openLabel}" in "${top.tag.field.displayName}", but got "${c.label}" in "${t.field.displayName}"`,
+            fieldIdx: t.fieldIdx });
+        }
+      }
+    }
+  });
+  stack.forEach(s => issues.push({ level: 'error', title: 'Unclosed block',
+    detail: `${s.tag.raw} in "${s.tag.field.displayName}" (${s.tag.field.xdoId||'?'}) has no matching end`,
+    fieldIdx: s.tag.fieldIdx }));
+
+  // ---- Missing / cyclic refs ----
+  fields.forEach((f, fi) => {
+    if (f.missing) issues.push({ level: 'error', title: 'Reference to missing definition',
+      detail: `<?ref:${f.xdoId}?> — no \\*\\docvar found`, fieldIdx: fi });
+    f.tags.forEach(t => {
+      if (t.missing) issues.push({ level: 'error', title: 'Nested ref missing',
+        detail: t.raw + ' inside "' + f.displayName + '"', fieldIdx: fi });
+      if (t.cycle) issues.push({ level: 'error', title: 'Circular reference',
+        detail: t.raw + ' inside "' + f.displayName + '"', fieldIdx: fi });
+    });
+  });
+
+  // ---- 2. SYNTAX ----
+  const XDOFX = new Set(['if','end if','sysdate','date','ifelse','left','right','substr','substring','instr','length','trim','ltrim','rtrim','upper','lower','initcap','replace','nvl','decode','to_char','to_date','to_number','round','trunc','floor','ceil','mod','abs','power','sqrt','sum','avg','max','min','count','concat','case','when','then','else','end']);
+  const XDOXSLT = new Set(['set_variable','get_variable','last_page_number','left','right','substring','concat','format_number','ifelse','decode','case','if','choose','when']);
+
+  fields.forEach((f, fi) => {
+    f.tags.forEach(t => {
+      const inner = t.inner;
+
+      // Unclosed single quotes
+      if ((inner.match(/'/g)||[]).length % 2 !== 0) {
+        issues.push({ level: 'error', title: 'Unclosed string literal',
+          detail: `Odd number of ' in ${t.raw.substring(0,80)} — inside "${f.displayName}"`, fieldIdx: fi });
+      }
+      // Parens
+      let paren = 0;
+      for (const ch of inner) { if (ch==='(') paren++; else if (ch===')') paren--; if (paren<0) break; }
+      if (paren !== 0) {
+        issues.push({ level: 'error', title: 'Unbalanced parentheses',
+          detail: `${paren > 0 ? paren + ' unclosed (' : Math.abs(paren) + ' extra )'} in ${t.raw.substring(0,80)} — inside "${f.displayName}"`,
+          fieldIdx: fi });
+      }
+      // Square brackets
+      let sq = 0;
+      for (const ch of inner) { if (ch==='[') sq++; else if (ch===']') sq--; if (sq<0) break; }
+      if (sq !== 0) {
+        issues.push({ level: 'error', title: 'Unbalanced brackets',
+          detail: `${sq > 0 ? sq + ' unclosed [' : Math.abs(sq) + ' extra ]'} in ${t.raw.substring(0,80)} — inside "${f.displayName}"`,
+          fieldIdx: fi });
+      }
+
+      // Unknown xdofx function calls
+      let m;
+      if ((m = inner.match(/^xdofx:\s*(\w+)\s*\(/))) {
+        if (!XDOFX.has(m[1].toLowerCase())) {
+          issues.push({ level: 'warn', title: 'Unknown xdofx function',
+            detail: `xdofx:${m[1]}(...) not in known list — check spelling in "${f.displayName}"`, fieldIdx: fi });
+        }
+      }
+      // Unknown xdoxslt function
+      if ((m = inner.match(/^xdoxslt:(\w+)/))) {
+        if (!XDOXSLT.has(m[1].toLowerCase())) {
+          issues.push({ level: 'warn', title: 'Unknown xdoxslt function',
+            detail: `xdoxslt:${m[1]}(...) not in known list — check spelling in "${f.displayName}"`, fieldIdx: fi });
+        }
+      }
+      // Malformed for-each / if
+      if (/^for-each[^:@\-]/.test(inner) && !/^for-each\s*$/.test(inner)) {
+        issues.push({ level: 'error', title: 'Malformed for-each',
+          detail: `${t.raw} — expected 'for-each:' or 'for-each-group:' or 'for-each@SECTION:'`, fieldIdx: fi });
+      }
+      if (/^if[^:]/.test(inner.toLowerCase()) && !inner.toLowerCase().startsWith('if:')) {
+        issues.push({ level: 'error', title: 'Malformed if',
+          detail: `${t.raw} — expected 'if:condition'`, fieldIdx: fi });
+      }
+    });
+  });
+
+  // ---- 3. BEST PRACTICES ----
+  fields.forEach((f, fi) => {
+    f.tags.forEach(t => {
+      const inner = t.inner;
+
+      if (/^format-number:/.test(inner) && !/;\s*['"]/.test(inner)) {
+        issues.push({ level: 'warn', title: 'format-number without mask',
+          detail: `${t.raw.substring(0,100)} — output will be locale-dependent. In "${f.displayName}"`, fieldIdx: fi });
+      }
+
+      const setMatch = inner.match(/xdoxslt:set_variable\s*\(\s*\$?_?XDOCTX\s*,\s*['"]([^'"]+)['"]/);
+      if (setMatch) {
+        const varName = setMatch[1];
+        const usedSomewhere = allTags.some(o =>
+          o.inner.includes('get_variable') && o.inner.includes(`'${varName}'`)
+        );
+        if (!usedSomewhere) {
+          issues.push({ level: 'warn', title: 'Variable set but never read',
+            detail: `'${varName}' set via xdoxslt:set_variable in "${f.displayName}" but no get_variable found`, fieldIdx: fi });
+        }
+      }
+
+      if (/^for-each-group:/.test(inner) && !inner.includes(';')) {
+        issues.push({ level: 'warn', title: 'for-each-group without group-by',
+          detail: `${t.raw.substring(0,100)} — missing ';groupByExpression'. In "${f.displayName}"`, fieldIdx: fi });
+      }
+
+      if (/xdoxslt:msg\b/.test(inner)) {
+        issues.push({ level: 'info', title: 'Deprecated call',
+          detail: `xdoxslt:msg is legacy — prefer standard i18n. In "${f.displayName}"`, fieldIdx: fi });
+      }
+
+      if (inner.length > 500) {
+        issues.push({ level: 'info', title: 'Very long expression',
+          detail: `${inner.length} chars in one tag inside "${f.displayName}" — consider intermediate variables`, fieldIdx: fi });
+      }
+
+      if (/\/\/[A-Z_]/.test(inner) && !/^ref:/.test(inner)) {
+        issues.push({ level: 'info', title: 'Descendant-axis XPath',
+          detail: `${t.raw.substring(0,80)} uses //NODE (whole-tree scan). In "${f.displayName}"`, fieldIdx: fi });
+      }
+    });
+
+    // Field-level: definition contains only literal text
+    if (f.rawCode && extractTagsFromString(f.rawCode).length === 0) {
+      issues.push({ level: 'info', title: 'Definition has no BIP tags',
+        detail: `"${f.displayName}" (${f.xdoId}) is literal only: ${f.rawCode.substring(0,60)}`, fieldIdx: fi });
+    }
+  });
+
+  return { issues, allTags };
+}
+
+// ==================== Render document ====================
+const $ = id => document.getElementById(id);
+let state = { events: [], fields: [], issues: [], showAll: false, expanded: new Set(), onlyIssues: false };
+
+function renderDoc() {
+  const out = $('output');
+  if (!state.events.length) { out.innerHTML = '<div class="empty">No content.</div>'; return; }
+
+  const q = $('search').value.trim().toLowerCase();
+  const issuesByField = new Map();
+  state.issues.forEach(i => {
+    if (i.fieldIdx == null) return;
+    if (!issuesByField.has(i.fieldIdx)) issuesByField.set(i.fieldIdx, []);
+    issuesByField.get(i.fieldIdx).push(i);
+  });
+
+  // Walk events and emit HTML. Track table state.
+  let html = ['<div class="doc">'];
+  let inTable = false;
+  let inRow = false;
+  let cellBuffer = '';
+  let cellsInRow = [];
+  let paragraph = [];
+  let paragraphAlign = 'left';
+
+  const flushParagraph = () => {
+    if (paragraph.length === 0) return;
+    const text = paragraph.join('');
+    if (text.trim() === '' && !paragraph.some(p => p.includes('fchip'))) { paragraph = []; return; }
+    const alignClass = paragraphAlign !== 'left' ? ` class="${paragraphAlign}"` : '';
+    html.push(`<p${alignClass}>${text || '&nbsp;'}</p>`);
+    paragraph = [];
+  };
+  const flushRow = () => {
+    if (!cellsInRow.length) return;
+    html.push('<tr>');
+    cellsInRow.forEach(c => {
+      const cls = c.header ? ' class="header"' : '';
+      html.push(`<td${cls}>${c.html || '&nbsp;'}</td>`);
+    });
+    html.push('</tr>');
+    cellsInRow = [];
+  };
+
+  const chipHtml = (ev) => {
+    const fi = ev._fieldIdx;
+    const f = state.fields[fi];
+    if (!f) return escapeHtml(`<?ref:${ev.xdoId}?>`);
+    const fIssues = issuesByField.get(fi) || [];
+    const hasErr = fIssues.some(i => i.level === 'error') || f.missing;
+    const hasWarn = fIssues.some(i => i.level === 'warn');
+
+    // Classify by first meaningful tag
+    let kindClass = '';
+    for (const t of f.tags) {
+      const c = classify(t.inner);
+      if (c.kind === 'loop') { kindClass = 'loop'; break; }
+      if (c.kind === 'cond') { kindClass = 'cond'; break; }
+      if (c.kind === 'close') { kindClass = 'close'; break; }
+    }
+    let cls = 'fchip';
+    if (hasErr) cls += ' err';
+    else if (hasWarn) cls += ' warn';
+    else if (kindClass) cls += ' ' + kindClass;
+
+    const expanded = state.showAll || state.expanded.has(fi);
+    if (expanded) cls += ' expanded';
+
+    const codePreview = (f.rawCode || f.tags.map(t=>t.raw).join(' ')).toLowerCase();
+    if (q && !f.displayName.toLowerCase().includes(q) && !codePreview.includes(q)) {
+      cls += ' faded';
+    }
+    if (state.onlyIssues && !hasErr && !hasWarn) {
+      cls += ' faded';
+    }
+
+    let inner = escapeHtml(f.displayName || ev.xdoId);
+    if (expanded) {
+      const codeHtml = renderCodeLines(f.tags);
+      const issuesHtml = fIssues.map(i => `<div class="issue ${i.level}" style="margin-top:6px"><strong>${escapeHtml(i.title)}</strong>: ${escapeHtml(i.detail)}</div>`).join('');
+      inner = `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;font-family:-apple-system,sans-serif"><span style="font-weight:bold">${escapeHtml(f.displayName)} <span style="opacity:0.5;font-weight:normal;font-size:11px">(${f.xdoId})</span></span><button class="copy-btn" data-copy-fi="${fi}" title="Copy tag name + code">📋 Copy</button></div><div class="code-view">${codeHtml || '<em>(no BIP tags)</em>'}</div>${issuesHtml}`;
+    } else {
+      // Small copy icon on collapsed chip too
+      inner += `<button class="copy-btn-sm" data-copy-fi="${fi}" title="Copy">📋</button>`;
+    }
+    return `<span class="${cls}" data-fi="${fi}">${inner}</span>`;
+  };
+
+  for (const ev of state.events) {
+    if (ev.type === 'trowd') {
+      flushParagraph();
+      if (!inTable) { html.push('<table>'); inTable = true; }
+      continue;
+    }
+    if (ev.type === 'row') {
+      flushRow();
+      continue;
+    }
+    if (ev.type === 'cell') {
+      // The current paragraph accumulator is this cell's content
+      cellsInRow.push({ html: paragraph.join(''), header: false });
+      paragraph = [];
+      continue;
+    }
+    if (ev.type === 'par') {
+      if (inTable && cellsInRow.length === 0 && paragraph.length === 0) continue;
+      if (!inTable) { flushParagraph(); }
+      else {
+        // Inside a cell, a \par is a line break within the cell — join with <br>
+        paragraph.push('<br>');
+      }
+      continue;
+    }
+    // Close table if we hit non-table content after rows
+    if (inTable && ev.type !== 'trowd' && ev.type !== 'cell' && ev.type !== 'row' && ev.type !== 'par' && cellsInRow.length === 0) {
+      html.push('</table>');
+      inTable = false;
+    }
+
+    if (ev.type === 'text') {
+      if (!ev.text.trim() && !paragraph.length) continue; // skip leading whitespace
+      // Skip noise from RTF page/section markers (lone *, bracket clusters)
+      const stripped = ev.text.replace(/[\s*().\[\]{}]+/g, '');
+      if (!stripped && ev.text.trim().length > 0 && !ev.text.includes('<?')) continue;
+      let piece = escapeHtml(ev.text).replace(/\n/g, '<br>').replace(/\t/g, '&nbsp;&nbsp;&nbsp;&nbsp;');
+      if (ev.bold) piece = `<b>${piece}</b>`;
+      if (ev.italic) piece = `<i>${piece}</i>`;
+      if (ev.fs && ev.fs !== 22) {
+        const pt = (ev.fs / 2).toFixed(1);
+        piece = `<span style="font-size:${pt}pt">${piece}</span>`;
+      }
+      paragraph.push(piece);
+      if (ev.alignment) paragraphAlign = ev.alignment;
+    }
+    if (ev.type === 'field') {
+      paragraph.push(chipHtml(ev));
+    }
+  }
+  flushParagraph();
+  if (inTable) { flushRow(); html.push('</table>'); }
+  html.push('</div>');
+  out.innerHTML = html.join('');
+
+  // Wire up interactions
+  out.querySelectorAll('.fchip').forEach(el => {
+    el.addEventListener('click', e => {
+      e.stopPropagation();
+      if (state.showAll) return;
+      const fi = +el.dataset.fi;
+      if (state.expanded.has(fi)) state.expanded.delete(fi);
+      else state.expanded.add(fi);
+      renderDoc();
+    });
+    el.addEventListener('mouseenter', e => {
+      const fi = +el.dataset.fi;
+      const f = state.fields[fi];
+      if (state.showAll || state.expanded.has(fi)) return;
+      showTooltip(e, f, issuesByField.get(fi) || []);
+    });
+    el.addEventListener('mousemove', moveTooltip);
+    el.addEventListener('mouseleave', hideTooltip);
+  });
+
+  // Copy buttons (both expanded and collapsed)
+  out.querySelectorAll('.copy-btn, .copy-btn-sm').forEach(btn => {
+    btn.addEventListener('click', e => {
+      e.stopPropagation(); // Don't toggle expand/collapse
+      const fi = +btn.dataset.copyFi;
+      const f = state.fields[fi];
+      if (!f) return;
+      const code = f.tags.map(t => t.raw).join('\n') || f.rawCode || '';
+      const text = `// ${f.displayName} (${f.xdoId || 'literal'})\n${code}`;
+      navigator.clipboard.writeText(text).then(() => {
+        const orig = btn.textContent;
+        btn.textContent = '✓ Copied';
+        if (btn.classList.contains('copy-btn')) btn.classList.add('copied');
+        setTimeout(() => { btn.textContent = orig; btn.classList.remove('copied'); }, 1500);
+      });
+    });
+  });
+
+  const errs = state.issues.filter(i => i.level==='error').length;
+  const warns = state.issues.filter(i => i.level==='warn').length;
+  $('stats').textContent = `${state.fields.length} fields · ${errs} errors · ${warns} warnings`;
+}
+
+function renderCodeLines(tags) {
+  let depth = 0;
+  return tags.map(t => {
+    const c = classify(t.inner);
+    let showDepth = depth;
+    if (c.delta < 0) { depth = Math.max(0, depth + c.delta); showDepth = depth; }
+    else if (c.mid) showDepth = Math.max(0, depth - 1);
+    const cls = 'k-' + c.kind;
+    const indent = '  '.repeat(showDepth);
+    const esc = t.raw.replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    if (c.delta > 0) depth += c.delta;
+    return `<div><span class="${cls}">${indent}${esc}</span></div>`;
+  }).join('');
+}
+function escapeHtml(s) { return String(s).replace(/[<>&"']/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;',"'":'&#39;'}[c])); }
+
+function showTooltip(ev, field, issues) {
+  const tt = $('tooltip');
+  const code = field.tags.map(t => t.raw).join('\n') || field.rawCode || '(no code)';
+  const trimmed = code.length > 1200 ? code.substring(0,1200) + '\n\n… (' + (code.length - 1200) + ' more chars)' : code;
+  const issuesHtml = issues.length ? `<div class="t-err">${issues.map(i => `⚠ ${escapeHtml(i.title)}: ${escapeHtml(i.detail.substring(0,150))}`).join('<br>')}</div>` : '';
+  tt.innerHTML = `<div class="t-title">${escapeHtml(field.displayName)}${field.xdoId ? ' <span style="opacity:0.6">('+field.xdoId+')</span>' : ''}</div>${escapeHtml(trimmed)}${issuesHtml}`;
+  tt.classList.add('visible');
+  moveTooltip(ev);
+}
+function moveTooltip(ev) {
+  const tt = $('tooltip');
+  const pad = 14;
+  let x = ev.clientX + pad, y = ev.clientY + pad;
+  const rect = tt.getBoundingClientRect();
+  if (x + rect.width > window.innerWidth) x = ev.clientX - rect.width - pad;
+  if (y + rect.height > window.innerHeight) y = ev.clientY - rect.height - pad;
+  tt.style.left = x + 'px'; tt.style.top = y + 'px';
+}
+function hideTooltip() { $('tooltip').classList.remove('visible'); }
+
+function renderValidationPanel() {
+  const panel = $('validationPanel');
+  const errs = state.issues.filter(i => i.level==='error');
+  const warns = state.issues.filter(i => i.level==='warn');
+  const infos = state.issues.filter(i => i.level==='info');
+  if (!state.issues.length) { panel.innerHTML = `<div class="validation"><div class="no-issues">✅ No validation issues found.</div></div>`; return; }
+  const group = (list, label) => list.length === 0 ? '' : `<div style="margin-top:6px;font-size:11px;color:#555;text-transform:uppercase">${label} (${list.length})</div>` + list.slice(0,50).map(i => `<div class="issue ${i.level}"><strong>${escapeHtml(i.title)}</strong>: <span style="font-family:ui-monospace,Consolas,monospace;font-size:11px">${escapeHtml(i.detail)}</span></div>`).join('');
+  panel.innerHTML = `<div class="validation"><div class="validation-header" onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display==='none'?'block':'none'"><span>Validation: ${errs.length ? '<span style=color:#dc2626>'+errs.length+' errors</span>' : ''}${warns.length ? (errs.length?', ':'')+'<span style=color:#f59e0b>'+warns.length+' warnings</span>' : ''}${infos.length ? (errs.length||warns.length?', ':'')+'<span style=color:#3b82f6>'+infos.length+' info</span>' : ''}</span><span style="opacity:0.5">click to toggle</span></div><div class="validation-body">${group(errs,'Errors')}${group(warns,'Warnings')}${group(infos,'Info')}</div></div>`;
+}
+
+async function handleFile(file) {
+  $('fileInfo').innerHTML = `<div class="file-info">Reading <strong>${file.name}</strong>…</div>`;
+  $('output').innerHTML = '';
+  $('validationPanel').innerHTML = '';
+  try {
+    if (!file.name.toLowerCase().endsWith('.rtf')) throw new Error('v2 supports .rtf only (visual layout requires RTF structure)');
+    const raw = await file.text();
+    const parsed = parseRtfToBlocks(raw);
+    const fields = buildFields(parsed.events, parsed.defs);
+    const validation = validate(fields);
+    state = { events: parsed.events, fields, issues: validation.issues, showAll: false, expanded: new Set(), onlyIssues: false };
+    $('fileInfo').innerHTML = `<div class="file-info">✓ <strong>${file.name}</strong> — ${fields.length} fields · ${Object.keys(parsed.defs).length} hidden defs · ${validation.allTags.length} resolved tags</div>`;
+    $('controls').style.display = 'flex';
+    renderValidationPanel();
+    renderDoc();
+  } catch (e) {
+    $('fileInfo').innerHTML = `<div class="err">Error: ${e.message}</div>`;
+    console.error(e);
+  }
+}
+
+const drop = $('drop');
+drop.addEventListener('dragover', e => { e.preventDefault(); drop.classList.add('hover'); });
+drop.addEventListener('dragleave', () => drop.classList.remove('hover'));
+drop.addEventListener('drop', e => { e.preventDefault(); drop.classList.remove('hover'); if (e.dataTransfer.files[0]) handleFile(e.dataTransfer.files[0]); });
+$('file').addEventListener('change', e => { if (e.target.files[0]) handleFile(e.target.files[0]); });
+$('search').addEventListener('input', renderDoc);
+$('showAll').addEventListener('click', () => {
+  state.showAll = !state.showAll;
+  $('showAll').classList.toggle('active', state.showAll);
+  $('showAll').textContent = state.showAll ? 'Hide all code' : 'Show all code';
+  renderDoc();
+});
+$('collapseAll').addEventListener('click', () => {
+  state.showAll = false; state.expanded.clear();
+  $('showAll').classList.remove('active'); $('showAll').textContent = 'Show all code';
+  renderDoc();
+});
+$('onlyIssues').addEventListener('click', () => {
+  state.onlyIssues = !state.onlyIssues;
+  $('onlyIssues').classList.toggle('active', state.onlyIssues);
+  renderDoc();
+});
+</script>
+
+<details>
+  <summary>About v2 — RTF-like layout</summary>
+  <div style="font-size:13px;color:#555;margin-top:8px;line-height:1.7">
+    Renders the RTF's tables, paragraphs, font sizes, bold/italic, and alignment. Fields appear as colored chips
+    positioned exactly where they sit in the document (in the right cell, in the right paragraph).<br><br>
+    <strong>Chip colors:</strong> blue = plain data field · amber = for-each loop · purple = if/choose · red = has errors · orange = has warnings.<br>
+    <strong>Hover</strong> for code preview · <strong>click</strong> to expand code inline · <strong>Show all code</strong> to expand everything.<br><br>
+    <strong>Not rendered:</strong> images, exact fonts, page headers/footers, list numbering, merged cells (approximated). This is an approximation of Word's layout, not a pixel-perfect render.
+  </div>
+</details>
+
+</body>
+</html>
